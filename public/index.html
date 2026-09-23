@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>888SHOP | Street Culture</title>
+    <style>
+        :root {
+            --bg: #0a0a0a;
+            --surface: #1a1a1a;
+            --text: #ffffff;
+            --accent: #ffffff;
+            --gray: #888888;
+            --border: #333333;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg); color: var(--text); overflow-x: hidden; }
+        
+        header { padding: 1.5rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: rgba(10,10,10,0.8); backdrop-filter: blur(20px); z-index: 100; }
+        .logo { font-size: 1.8rem; font-weight: 900; letter-spacing: -2px; }
+        .nav-links { display: flex; gap: 2rem; align-items: center; }
+        .cart-trigger { background: var(--accent); color: black; padding: 0.6rem 1.4rem; border-radius: 0.2rem; cursor: pointer; font-weight: 800; font-size: 0.8rem; transition: transform 0.2s; }
+        .cart-trigger:hover { transform: scale(1.05); }
+
+        main { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+        
+        .hero { height: 60vh; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; border-bottom: 1px solid var(--border); margin-bottom: 4rem; }
+        .hero h1 { font-size: 6rem; font-weight: 900; line-height: 0.9; text-transform: uppercase; margin-bottom: 1rem; }
+        .hero p { color: var(--gray); letter-spacing: 4px; font-size: 0.9rem; }
+
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 3rem; }
+        .product-card { cursor: pointer; }
+        .img-container { position: relative; width: 100%; aspect-ratio: 3/4; overflow: hidden; background: var(--surface); border-radius: 0.5rem; }
+        .img-container img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.5s ease; }
+        .product-card:hover img { transform: scale(1.08); }
+        .badge { position: absolute; top: 1rem; right: 1rem; background: white; color: black; padding: 0.3rem 0.6rem; font-size: 0.7rem; font-weight: 900; }
+        
+        .info { margin-top: 1.5rem; display: flex; justify-content: space-between; align-items: flex-start; }
+        .title { font-weight: 700; font-size: 1.2rem; }
+        .price { color: var(--gray); font-size: 1.1rem; }
+
+        /* Modal Details */
+        .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: none; z-index: 1000; overflow-y: auto; }
+        .modal.active { display: flex; align-items: center; justify-content: center; }
+        .modal-content { background: var(--surface); width: 90%; max-width: 1000px; border-radius: 1rem; display: flex; overflow: hidden; position: relative; }
+        .modal-close { position: absolute; top: 1.5rem; right: 1.5rem; font-size: 2rem; cursor: pointer; z-index: 10; }
+        
+        .modal-img { flex: 1; background: #000; }
+        .modal-img img { width: 100%; height: 100%; object-fit: cover; }
+        .modal-info { flex: 1; padding: 3rem; display: flex; flex-direction: column; gap: 1.5rem; }
+        
+        .size-btn { border: 1px solid var(--border); background: none; color: white; padding: 0.8rem 1.2rem; cursor: pointer; transition: all 0.2s; }
+        .size-btn.selected { background: white; color: black; border-color: white; }
+        
+        .buy-btn { background: white; color: black; border: none; padding: 1.2rem; font-weight: 900; font-size: 1rem; cursor: pointer; margin-top: 1rem; }
+
+        /* Cart Sidebar */
+        .cart-sidebar { position: fixed; top: 0; right: -450px; width: 450px; height: 100vh; background: var(--surface); z-index: 2000; transition: right 0.3s ease; padding: 3rem; display: flex; flex-direction: column; }
+        .cart-sidebar.active { right: 0; }
+        
+        @media (max-width: 800px) {
+            .hero h1 { font-size: 3rem; }
+            .modal-content { flex-direction: column; width: 95%; height: 90vh; }
+            .modal-img { min-height: 300px; }
+            .cart-sidebar { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo">888SHOP</div>
+        <div class="nav-links">
+            <span style="font-size: 0.8rem; font-weight: 600; cursor: pointer;" onclick="toggleCart()">CART (<span id="cart-count">0</span>)</span>
+            <button class="cart-trigger" onclick="toggleCart()">SHOP NOW</button>
+        </div>
+    </header>
+
+    <main>
+        <section class="hero">
+            <p>ESTABLISHED 2026</p>
+            <h1>DROP<br>ONE</h1>
+        </section>
+
+        <div class="grid" id="product-grid"></div>
+    </main>
+
+    <!-- Product Modal -->
+    <div class="modal" id="p-modal" onclick="closeModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <span class="modal-close" onclick="closeModal()">✕</span>
+            <div class="modal-img"><img id="m-img" src=""></div>
+            <div class="modal-info">
+                <h2 id="m-title" style="font-size: 2.5rem; font-weight: 900;"></h2>
+                <div id="m-price" style="font-size: 1.5rem; opacity: 0.5;"></div>
+                <p id="m-desc" style="color: var(--gray); line-height: 1.6;"></p>
+                <div>
+                    <div style="margin-bottom: 0.5rem; font-size: 0.8rem; font-weight: 700;">SELECT SIZE</div>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button class="size-btn" onclick="selSize(this)">S</button>
+                        <button class="size-btn" onclick="selSize(this)">M</button>
+                        <button class="size-btn" onclick="selSize(this)">L</button>
+                        <button class="size-btn" onclick="selSize(this)">XL</button>
+                    </div>
+                </div>
+                <div id="m-stock" style="font-size: 0.8rem; color: #4ade80; font-weight: 700;">● IN STOCK</div>
+                <button class="buy-btn" id="m-add-btn">ADD TO BAG</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cart Sidebar -->
+    <div class="cart-sidebar" id="cart-s">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3rem;">
+            <h2 style="font-weight: 900; font-size: 1.5rem;">YOUR BAG</h2>
+            <span onclick="toggleCart()" style="cursor: pointer; font-size: 1.5rem;">✕</span>
+        </div>
+        <div id="cart-items" style="flex: 1; overflow-y: auto;"></div>
+        <div style="margin-top: 2rem; border-top: 1px solid var(--border); padding-top: 2rem;">
+            <div style="display: flex; justify-content: space-between; font-size: 1.2rem; font-weight: 900; margin-bottom: 2rem;">
+                <span>TOTAL</span>
+                <span id="cart-total">0 ₽</span>
+            </div>
+            <input type="text" id="cust-name" placeholder="TELEGRAM @USER" style="width: 100%; background: none; border: 1px solid var(--border); padding: 1.2rem; color: white; border-radius: 0.5rem; margin-bottom: 1rem;">
+            <button class="buy-btn" style="width: 100%;" onclick="checkout()">CHECKOUT</button>
+        </div>
+    </div>
+
+    <script>
+        const products = [
+            {
+                id: 1, 
+                name: 'PUFFER 888 STAR', 
+                price: 2500, 
+                image: 'https://sc04.alicdn.com/kf/Afd4c970baa1847a4b161a45259004779C.jpg',
+                desc: 'Зимняя куртка оверсайз с логотипом на рукаве. Влагостойкий материал, утеплитель холлофайбер. Идеально для русской зимы.',
+                stock: 'В НАЛИЧИИ'
+            },
+            {
+                id: 2, 
+                name: 'OVERSIZE HOODIE', 
+                price: 3500, 
+                image: 'https://images.unsplash.com/photo-1556821840-3a63f95609a7?q=80&w=600',
+                desc: 'Тяжелый хлопок 500г/м. Расслабленный крой, глубокий капюшон. Вышивка на груди.',
+                stock: 'В НАЛИЧИИ'
+            },
+            {
+                id: 3, 
+                name: 'BASIC T-SHIRT', 
+                price: 1200, 
+                image: 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?q=80&w=600',
+                desc: 'Классическая футболка из премиального хлопка. Идеальная база под любой образ.',
+                stock: 'В НАЛИЧИИ'
+            }
+        ];
+
+        let cart = [];
+        let selectedSize = '';
+
+        function renderGrid() {
+            const grid = document.getElementById('product-grid');
+            grid.innerHTML = products.map(p => `
+                <div class="product-card" onclick="openProduct(${p.id})">
+                    <div class="img-container">
+                        <img src="${p.image}" alt="${p.name}">
+                        <div class="badge">NEW</div>
+                    </div>
+                    <div class="info">
+                        <div>
+                            <div class="title">${p.name}</div>
+                            <div style="font-size: 0.7rem; color: var(--gray); margin-top: 0.2rem;">${p.stock}</div>
+                        </div>
+                        <div class="price">${p.price} ₽</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function openProduct(id) {
+            const p = products.find(x => x.id === id);
+            document.getElementById('m-img').src = p.image;
+            document.getElementById('m-title').innerText = p.name;
+            document.getElementById('m-price').innerText = p.price + ' ₽';
+            document.getElementById('m-desc').innerText = p.desc;
+            document.getElementById('m-add-btn').onclick = () => addToCart(p);
+            document.getElementById('p-modal').classList.add('active');
+            selectedSize = '';
+            document.querySelectorAll('.size-btn').forEach(b => b.classList.remove('selected'));
+        }
+
+        function closeModal(e) {
+            document.getElementById('p-modal').classList.remove('active');
+        }
+
+        function selSize(btn) {
+            document.querySelectorAll('.size-btn').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            selectedSize = btn.innerText;
+        }
+
+        function addToCart(p) {
+            if (!selectedSize) return alert('Пожалуйста, выберите размер!');
+            cart.push({...p, size: selectedSize});
+            updateCart();
+            closeModal();
+            toggleCart();
+        }
+
+        function toggleCart() {
+            document.getElementById('cart-s').classList.toggle('active');
+        }
+
+        function updateCart() {
+            document.getElementById('cart-count').innerText = cart.length;
+            const items = document.getElementById('cart-items');
+            items.innerHTML = cart.map(i => `
+                <div style="display: flex; gap: 1rem; margin-bottom: 2rem;">
+                    <img src="${i.image}" style="width: 80px; height: 100px; object-fit: cover; border-radius: 0.3rem;">
+                    <div style="flex: 1;">
+                        <div style="font-weight: 800; font-size: 0.9rem;">${i.name}</div>
+                        <div style="color: var(--gray); font-size: 0.8rem; margin-top: 0.4rem;">SIZE: ${i.size}</div>
+                        <div style="font-weight: 700; margin-top: 0.5rem;">${i.price} ₽</div>
+                    </div>
+                </div>
+            `).join('');
+            const total = cart.reduce((s, x) => s + x.price, 0);
+            document.getElementById('cart-total').innerText = total + ' ₽';
+        }
+
+        async function checkout() {
+            const name = document.getElementById('cust-name').value;
+            if (!name) return alert('Введите ваш Telegram!');
+            
+            // Запрос на сервер
+            const res = await fetch('/api/order', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ items: cart, total: cart.reduce((s,x)=>s+x.p,0), customerName: name })
+            });
+            alert('ЗАКАЗ ПРИНЯТ! Ожидайте подтверждения в Telegram.');
+            cart = [];
+            updateCart();
+            toggleCart();
+        }
+
+        renderGrid();
+    </script>
+</body>
+</html>
