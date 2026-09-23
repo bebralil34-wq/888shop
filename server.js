@@ -5,7 +5,6 @@ const bodyParser = require('body-parser');
 const path = require('path');
 
 const app = express();
-// Токен от пользователя
 const BOT_TOKEN = '8626170046:AAH5qelrYeRVzlWRKySJpQ5t04NFRKrc5yU';
 const bot = new Telegraf(BOT_TOKEN);
 const db = new sqlite3.Database('./shop.db');
@@ -13,77 +12,91 @@ const db = new sqlite3.Database('./shop.db');
 app.use(bodyParser.json());
 app.use(express.static('public'));
 
-// База данных
+// Расширенная БД
 db.serialize(() => {
-    db.run("CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY, name TEXT, price REAL, image TEXT)");
+    db.run("CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY, name TEXT, price REAL, image TEXT, category TEXT, description TEXT)");
+    db.run("CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY, customer_name TEXT, phone TEXT, ozon_info TEXT, total REAL, status TEXT DEFAULT 'pending')");
     db.run("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)");
     db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('payment_info', 'Номер: +79000000000 (Сбербанк)')");
-    
-    // Демо-данные
-    db.get("SELECT count(*) as count FROM products", (err, row) => {
-        if (row.count === 0) {
-            db.run("INSERT INTO products (name, price, image) VALUES ('Пуховик 888 Star Black', 2500, 'https://sc04.alicdn.com/kf/Afd4c970baa1847a4b161a45259004779C.jpg')");
-            db.run("INSERT INTO products (name, price, image) VALUES ('Оверсайз Худи Black', 3500, 'https://images.unsplash.com/photo-1556821840-3a63f95609a7?q=80&w=600')");
-            db.run("INSERT INTO products (name, price, image) VALUES ('Футболка Basic White', 1200, 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?q=80&w=600')");
-        }
-    });
 });
 
 // API
 app.get('/api/products', (req, res) => {
-    db.all("SELECT * FROM products", [], (err, rows) => {
-        res.json(rows);
-    });
+    const category = req.query.category;
+    let sql = "SELECT * FROM products";
+    if (category && category !== 'Все') sql += ` WHERE category = '${category}'`;
+    db.all(sql, [], (err, rows) => res.json(rows));
 });
 
 app.post('/api/order', (req, res) => {
-    const { items, total, customerName } = req.body;
-    db.get("SELECT value FROM settings WHERE key = 'admin_id'", (err, row) => {
-        const adminId = row ? row.value : null;
-        if (!adminId) return res.status(500).json({ error: "Админ не инициализирован. Напишите /start боту." });
-
-        const orderText = `📦 *Новый заказ!*\n\n👤 Клиент: ${customerName}\n🛒 Товары: ${items.map(i => i.name).join(', ')}\n💰 Сумма: ${total} руб.`;
-        
-        bot.telegram.sendMessage(adminId, orderText, {
-            parse_mode: 'Markdown',
-            ...Markup.inlineKeyboard([
-                [Markup.button.callback('✅ Подтвердить', `confirm_${customerName}`)],
-                [Markup.button.callback('❌ Отклонить', 'reject')]
-            ])
+    const { items, total, customerName, phone, ozonInfo } = req.body;
+    db.run("INSERT INTO orders (customer_name, phone, ozon_info, total) VALUES (?, ?, ?, ?)", 
+        [customerName, phone, ozonInfo, total], function(err) {
+        const orderId = this.lastID;
+        db.get("SELECT value FROM settings WHERE key = 'admin_id'", (err, row) => {
+            if (row) {
+                const msg = `📦 *НОВЫЙ ЗАКАЗ №${orderId}*\n\n👤 Клиент: ${customerName}\n📞 Тел: ${phone}\n📍 Ozon: ${ozonInfo}\n🛒 Товары: ${items.map(i => i.name).join(', ')}\n💰 Сумма: ${total} руб.`;
+                bot.telegram.sendMessage(row.value, msg, {
+                    parse_mode: 'Markdown',
+                    ...Markup.inlineKeyboard([
+                        [Markup.button.callback('✅ Подтвердить', `conf_${orderId}`)],
+                        [Markup.button.callback('❌ Отклонить', `rej_${orderId}`)]
+                    ])
+                });
+            }
         });
-        
-        res.json({ success: true, message: "Заказ отправлен продавцу на подтверждение. Ожидайте уведомления!" });
+        res.json({ success: true, orderId });
     });
 });
 
-// Бот
+app.get('/api/order-status/:id', (req, res) => {
+    db.get("SELECT status FROM orders WHERE id = ?", [req.params.id], (err, order) => {
+        db.get("SELECT value FROM settings WHERE key = 'payment_info'", (err, setting) => {
+            res.json({ status: order.status, payment: setting.value });
+        });
+    });
+});
+
+// Telegram Бот - Админка
 bot.start((ctx) => {
     db.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('admin_id', ?)", [ctx.chat.id]);
-    ctx.reply('👋 Добро пожаловать в панель управления 888shop!\n\nВы зарегистрированы как администратор.', Markup.keyboard([
-        ['➕ Добавить товар', '📝 Изменить реквизиты'],
-        ['📊 Статистика', '⚙️ Настройки']
+    ctx.reply('888SHOP ADMIN LOADED', Markup.keyboard([
+        ['📦 Товары', '📝 Реквизиты'],
+        ['➕ Добавить товар']
     ]).resize());
 });
 
-bot.hears('📝 Изменить реквизиты', (ctx) => {
-    ctx.reply('Пришлите новые реквизиты в формате: \nНомер: XXXX, Банк: XXXX');
+// Добавление товара через фото
+let tempProduct = {};
+bot.hears('➕ Добавить товар', (ctx) => {
+    ctx.reply('Пришлите фото товара');
 });
 
-bot.on('text', (ctx) => {
-    if (ctx.message.text.includes('Номер:')) {
-        db.run("UPDATE settings SET value = ? WHERE key = 'payment_info'", [ctx.message.text]);
-        ctx.reply('✅ Реквизиты успешно обновлены!');
-    }
-});
-
-bot.action(/confirm_(.+)/, (ctx) => {
-    const customer = ctx.match[1];
-    db.get("SELECT value FROM settings WHERE key = 'payment_info'", (err, row) => {
-        ctx.reply(`✅ Заказ подтвержден для ${customer}.\nРеквизиты для оплаты:\n${row.value}\n\nПожалуйста, свяжитесь с клиентом.`);
+bot.on('photo', (ctx) => {
+    const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+    bot.telegram.getFileLink(fileId).then(link => {
+        tempProduct.image = link.href;
+        ctx.reply('Введите название, цену и категорию через запятую\nПример: Jordan 4, 15000, Обувь');
     });
 });
 
-bot.launch();
+bot.on('text', (ctx) => {
+    if (ctx.message.text.includes(',')) {
+        const [name, price, cat] = ctx.message.text.split(',');
+        db.run("INSERT INTO products (name, price, image, category) VALUES (?, ?, ?, ?)", [name.trim(), price.trim(), tempProduct.image, cat.trim()]);
+        ctx.reply('✅ Товар добавлен в каталог!');
+    }
+    if (ctx.message.text.startsWith('Реквизиты:')) {
+        db.run("UPDATE settings SET value = ? WHERE key = 'payment_info'", [ctx.message.text]);
+        ctx.reply('✅ Реквизиты обновлены!');
+    }
+});
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Сервер 888shop запущен на порту ${PORT}`));
+bot.action(/conf_(.+)/, (ctx) => {
+    const id = ctx.match[1];
+    db.run("UPDATE orders SET status = 'confirmed' WHERE id = ?", [id]);
+    ctx.editMessageText(`✅ Заказ №${id} подтвержден! Реквизиты отправлены клиенту.`);
+});
+
+bot.launch();
+app.listen(3000);
