@@ -5,8 +5,11 @@ const bodyParser = require('body-parser');
 const path = require('path');
 
 const app = express();
-const BOT_TOKEN = '8626170046:AAH5qelrYeRVzlWRKySJpQ5t04NFRKrc5yU';
-const bot = new Telegraf(BOT_TOKEN);
+const BOT_TOKEN = process.env.BOT_TOKEN;
+if (!BOT_TOKEN) {
+    console.warn('BOT_TOKEN is not set: the website will run, but Telegram features are disabled.');
+}
+const bot = BOT_TOKEN ? new Telegraf(BOT_TOKEN) : null;
 const db = new sqlite3.Database('./shop.db');
 
 app.use(bodyParser.json());
@@ -34,7 +37,7 @@ app.post('/api/order', (req, res) => {
         [customerName, phone, ozonInfo, total], function(err) {
         const orderId = this.lastID;
         db.get("SELECT value FROM settings WHERE key = 'admin_id'", (err, row) => {
-            if (row) {
+            if (bot && row) {
                 const msg = `📦 *НОВЫЙ ЗАКАЗ №${orderId}*\n\n👤 Клиент: ${customerName}\n📞 Тел: ${phone}\n📍 Ozon: ${ozonInfo}\n🛒 Товары: ${items.map(i => i.name).join(', ')}\n💰 Сумма: ${total} руб.`;
                 bot.telegram.sendMessage(row.value, msg, {
                     parse_mode: 'Markdown',
@@ -58,7 +61,7 @@ app.get('/api/order-status/:id', (req, res) => {
 });
 
 // Telegram Бот - Админка
-bot.start((ctx) => {
+if (bot) bot.start((ctx) => {
     db.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('admin_id', ?)", [ctx.chat.id]);
     ctx.reply('888SHOP ADMIN LOADED', Markup.keyboard([
         ['📦 Товары', '📝 Реквизиты'],
@@ -68,35 +71,39 @@ bot.start((ctx) => {
 
 // Добавление товара через фото
 let tempProduct = {};
-bot.hears('➕ Добавить товар', (ctx) => {
-    ctx.reply('Пришлите фото товара');
-});
-
-bot.on('photo', (ctx) => {
-    const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-    bot.telegram.getFileLink(fileId).then(link => {
-        tempProduct.image = link.href;
-        ctx.reply('Введите название, цену и категорию через запятую\nПример: Jordan 4, 15000, Обувь');
+if (bot) {
+    bot.hears('➕ Добавить товар', (ctx) => {
+        ctx.reply('Пришлите фото товара');
     });
-});
 
-bot.on('text', (ctx) => {
-    if (ctx.message.text.includes(',')) {
-        const [name, price, cat] = ctx.message.text.split(',');
-        db.run("INSERT INTO products (name, price, image, category) VALUES (?, ?, ?, ?)", [name.trim(), price.trim(), tempProduct.image, cat.trim()]);
-        ctx.reply('✅ Товар добавлен в каталог!');
-    }
-    if (ctx.message.text.startsWith('Реквизиты:')) {
-        db.run("UPDATE settings SET value = ? WHERE key = 'payment_info'", [ctx.message.text]);
-        ctx.reply('✅ Реквизиты обновлены!');
-    }
-});
+    bot.on('photo', (ctx) => {
+        const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+        bot.telegram.getFileLink(fileId).then(link => {
+            tempProduct.image = link.href;
+            ctx.reply('Введите название, цену и категорию через запятую\nПример: Jordan 4, 15000, Обувь');
+        });
+    });
 
-bot.action(/conf_(.+)/, (ctx) => {
-    const id = ctx.match[1];
-    db.run("UPDATE orders SET status = 'confirmed' WHERE id = ?", [id]);
-    ctx.editMessageText(`✅ Заказ №${id} подтвержден! Реквизиты отправлены клиенту.`);
-});
+    bot.on('text', (ctx) => {
+        if (ctx.message.text.includes(',')) {
+            const [name, price, cat] = ctx.message.text.split(',');
+            db.run("INSERT INTO products (name, price, image, category) VALUES (?, ?, ?, ?)", [name.trim(), price.trim(), tempProduct.image, cat.trim()]);
+            ctx.reply('✅ Товар добавлен в каталог!');
+        }
+        if (ctx.message.text.startsWith('Реквизиты:')) {
+            db.run("UPDATE settings SET value = ? WHERE key = 'payment_info'", [ctx.message.text]);
+            ctx.reply('✅ Реквизиты обновлены!');
+        }
+    });
 
-bot.launch();
-app.listen(3000);
+    bot.action(/conf_(.+)/, (ctx) => {
+        const id = ctx.match[1];
+        db.run("UPDATE orders SET status = 'confirmed' WHERE id = ?", [id]);
+        ctx.editMessageText(`✅ Заказ №${id} подтвержден! Реквизиты отправлены клиенту.`);
+    });
+
+    bot.launch();
+}
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`888shop listening on ${PORT}`));
