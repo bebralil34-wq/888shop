@@ -11,6 +11,7 @@ const DATA_FILE = path.join(__dirname, 'shop-data.json');
 
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+app.get('/shop-data.json', (_req, res) => res.status(404).json({ error: 'Not found' }));
 
 const seedProducts = [
     {
