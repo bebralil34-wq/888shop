@@ -160,7 +160,17 @@ if (BOT_TOKEN) {
         ]).resize());
     });
 
-    bot.hears('📝 Реквизиты', ctx => ctx.reply('Отправьте реквизиты одной строкой в формате: Реквизиты: номер, банк'));
+    const isAdmin = ctx => {
+        const configuredAdmin = ADMIN_CHAT_ID || data.settings.admin_id;
+        return !configuredAdmin || String(ctx.chat.id) === String(configuredAdmin);
+    };
+    let awaitingPaymentChatId = null;
+
+    bot.hears('📝 Реквизиты', ctx => {
+        if (!isAdmin(ctx)) return ctx.reply('Доступ разрешён только продавцу.');
+        awaitingPaymentChatId = String(ctx.chat.id);
+        return ctx.reply('Пришлите следующим сообщением реквизиты в любом формате. Например: Номер карты — ..., Банк — ...');
+    });
     bot.hears('📦 Заказы', ctx => {
         const pending = data.orders.filter(order => order.status === 'pending');
         ctx.reply(pending.length ? pending.map(order => `№${order.id} — ${order.total} ₽ — ${order.customerName}`).join('\n') : 'Новых заказов нет.');
@@ -186,10 +196,13 @@ if (BOT_TOKEN) {
 
     bot.on('text', ctx => {
         const text = ctx.message.text.trim();
-        if (text.startsWith('Реквизиты:')) {
-            data.settings.payment_info = text.replace(/^Реквизиты:\s*/i, '').trim();
+        if (awaitingPaymentChatId && String(ctx.chat.id) === awaitingPaymentChatId && !['📝 Реквизиты', '➕ Добавить товар', '📦 Заказы', '📊 Товары'].includes(text)) {
+            const paymentInfo = text.replace(/^Реквизиты:\s*/i, '').trim();
+            if (paymentInfo.length < 3) return ctx.reply('Реквизиты слишком короткие. Пришлите номер и название банка.');
+            data.settings.payment_info = paymentInfo;
+            awaitingPaymentChatId = null;
             saveData(data);
-            return ctx.reply('Реквизиты обновлены.');
+            return ctx.reply('✅ Реквизиты сохранены и будут показаны покупателю после подтверждения заказа.');
         }
         if (draft.image && text.split(',').length >= 3) {
             const [name, priceText, category] = text.split(',').map(value => value.trim());
