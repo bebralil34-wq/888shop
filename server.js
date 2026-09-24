@@ -111,16 +111,43 @@ function sendNewOrder(order) {
 
 app.get('/api/products', (req, res) => {
     const category = req.query.category;
+    const visibleProducts = data.products.filter(product => Number(product.stock ?? 1) > 0);
     const products = category && category !== 'Все'
-        ? data.products.filter(product => product.category === category)
-        : data.products;
+        ? visibleProducts.filter(product => product.category === category)
+        : visibleProducts;
     res.json(products);
 });
 
 app.post('/api/order', (req, res) => {
-    const { items, total, customerName, phone, ozonInfo } = req.body || {};
+    const { items, customerName, phone, ozonInfo } = req.body || {};
     if (!customerName || !phone || !ozonInfo || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: 'Заполните данные получателя и добавьте товар в корзину' });
+    }
+
+    const requested = items.map(item => ({
+        productId: Number(item.id),
+        size: item.size || ''
+    }));
+    const counts = new Map();
+    for (const item of requested) counts.set(item.productId, (counts.get(item.productId) || 0) + 1);
+
+    for (const [productId, quantity] of counts) {
+        const product = data.products.find(item => item.id === productId);
+        const stock = Number(product?.stock ?? 0);
+        if (!product || stock < quantity) {
+            return res.status(409).json({ error: 'Один из товаров уже закончился. Обновите каталог и попробуйте снова.' });
+        }
+    }
+
+    const orderItems = requested.map(item => {
+        const product = data.products.find(product => product.id === item.productId);
+        return { productId: product.id, name: product.name, price: Number(product.price) || 0, size: item.size };
+    });
+    const orderTotal = orderItems.reduce((sum, item) => sum + item.price, 0);
+
+    for (const [productId, quantity] of counts) {
+        const product = data.products.find(item => item.id === productId);
+        product.stock = Number(product.stock ?? 0) - quantity;
     }
 
     const order = {
@@ -128,9 +155,10 @@ app.post('/api/order', (req, res) => {
         customerName: String(customerName).slice(0, 200),
         phone: String(phone).slice(0, 80),
         ozonInfo: String(ozonInfo).slice(0, 500),
-        items: items.map(item => ({ name: String(item.name), price: Number(item.price) || 0, size: item.size || '' })),
-        total: Number(total) || 0,
+        items: orderItems,
+        total: orderTotal,
         status: 'pending',
+        stockRestored: false,
         createdAt: new Date().toISOString()
     };
 
@@ -175,7 +203,41 @@ if (BOT_TOKEN) {
         const pending = data.orders.filter(order => order.status === 'pending');
         ctx.reply(pending.length ? pending.map(order => `№${order.id} — ${order.total} ₽ — ${order.customerName}`).join('\n') : 'Новых заказов нет.');
     });
-    bot.hears('📊 Товары', ctx => ctx.reply(data.products.map(product => `#${product.id} ${product.name} — ${product.price} ₽`).join('\n')));
+    bot.hears('📊 Товары', ctx => {
+        if (!isAdmin(ctx)) return ctx.reply('Доступ разрешён только продавцу.');
+        if (!data.products.length) return ctx.reply('Каталог пуст.');
+        const rows = data.products.map(product => [
+            Markup.button.callback(`🗑 Удалить #${product.id} · ${product.name}`, `delete_product_${product.id}`)
+        ]);
+        return ctx.reply(
+            data.products.map(product => `#${product.id} ${product.name} — ${product.price} ₽ · остаток: ${product.stock ?? 0}`).join('\n'),
+            Markup.inlineKeyboard(rows)
+        );
+    });
+
+    bot.action(/delete_product_(\d+)/, async ctx => {
+        if (!isAdmin(ctx)) return ctx.answerCbQuery('Нет доступа');
+        const product = data.products.find(item => item.id === Number(ctx.match[1]));
+        if (!product) return ctx.answerCbQuery('Товар уже удалён');
+        await ctx.answerCbQuery('Нажмите подтверждение');
+        return ctx.reply(`Удалить товар «${product.name}»?`, Markup.inlineKeyboard([
+            [Markup.button.callback('Да, удалить', `delete_confirm_${product.id}`)],
+            [Markup.button.callback('Отмена', 'delete_cancel')]
+        ]));
+    });
+
+    bot.action(/delete_confirm_(\d+)/, async ctx => {
+        if (!isAdmin(ctx)) return ctx.answerCbQuery('Нет доступа');
+        const productId = Number(ctx.match[1]);
+        const index = data.products.findIndex(item => item.id === productId);
+        if (index === -1) return ctx.answerCbQuery('Товар уже удалён');
+        const [removed] = data.products.splice(index, 1);
+        saveData(data);
+        await ctx.answerCbQuery('Товар удалён');
+        return ctx.editMessageText(`✅ Товар «${removed.name}» удалён из каталога.`);
+    });
+
+    bot.action('delete_cancel', ctx => ctx.editMessageText('Удаление отменено.'));
 
     let draft = {};
     bot.hears('➕ Добавить товар', ctx => {
@@ -233,9 +295,16 @@ if (BOT_TOKEN) {
         const order = data.orders.find(item => item.id === Number(ctx.match[1]));
         if (!order) return ctx.answerCbQuery('Заказ не найден');
         order.status = 'rejected';
+        if (!order.stockRestored) {
+            for (const item of order.items) {
+                const product = data.products.find(product => product.id === item.productId);
+                if (product) product.stock = Number(product.stock ?? 0) + 1;
+            }
+            order.stockRestored = true;
+        }
         saveData(data);
-        await ctx.answerCbQuery('Заказ отклонён');
-        await ctx.editMessageText(`Заказ №${order.id} отклонён.`);
+        await ctx.answerCbQuery('Заказ отклонён, остаток восстановлен');
+        await ctx.editMessageText(`Заказ №${order.id} отклонён. Товар снова доступен в каталоге.`);
     });
 
     bot.launch().then(() => console.log('Telegram bot polling started')).catch(error => console.error('Telegram bot error:', error.message));
